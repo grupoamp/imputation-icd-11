@@ -1,0 +1,160 @@
+---
+title: "Imputación de datos del ICD-11"
+author: "Avances en Medición Psicológica"
+date: "19/7/2020"
+output: 
+  html_notebook: 
+    toc: yes
+    number_sections: yes
+---
+
+**Nota**: Abrir primero el proyecto `imputation-icd-11.Rproj`. Desde ahí, abrir el script.
+
+
+Se cargan los paquetes que se utilizarán para el proceso de imputación
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr, warn.conflicts = FALSE)
+library(osfr)
+library(TestDataImputation)
+```
+
+
+# Importación de los datos
+
+Se utiliza el paquete `osfr` para extraer los datos del archivo `.csv` que se encuentra en el repositorio de [Carnovale, M., Sellbom, M., & Bagby, R. M. (2019)](https://osf.io/yn2fp/).
+
+```{r}
+file_osf <- osf_retrieve_node("yn2fp") %>% 
+  osf_ls_files(pattern = ".csv")
+
+osf_download(file_osf, conflicts = "overwrite")
+```
+
+Ahora el archivo llamado `r file_osf$name` se encuentra en el directorio del proyecto. Se importará utilizando la función `readr::read_csv`.
+
+```{r}
+icd_11 <- readr::read_csv("Carnovale, Sellbom, & Bagby, 2019 Data.csv")
+```
+
+```{r}
+icd_11
+```
+
+# Contabilización de NA y filtrado
+
+Se realizará la imputación de datos en casos de personas que no superen el 20% de *missing* en las respuestas de los ítems de las dimensione de la prueba. Para verificar esto, se realiza la contabilización de `NA` en cada dimensión.
+
+Dado que cada dimensión tiene 12 ítems, el máximo número de missing aceptable por dimensión es de 2.
+
+```{r}
+icd_11 <- icd_11 %>% 
+  rowwise() %>% 
+  mutate(
+    na_NegatAffec = sum(is.na(c_across(c(p1, p6, p11, p16, p21, p26, p31,
+                                         p36, p41, p46, p51, p56)))),
+    na_Desinhibit = sum(is.na(c_across(c(p2, p7, p12, p17, p22, p27, p32, 
+                                         p37, p42, p47, p52, p57)))),
+    na_Detachment = sum(is.na(c_across(c(p3, p8, p13, p18, p23, p28, p33,
+                                         p38, p43, p48, p53, p58)))),
+    na_Dissocial  = sum(is.na(c_across(c(p4, p9, p14, p19, p24, p29, p34,
+                                         p39, p44, p49, p54, p59)))),
+    na_Anankastia = sum(is.na(c_across(c(p5, p10, p15, p20, p25, p30, p35, 
+                                         p40, p45, p50, p55, p60))))
+  ) %>% 
+  ungroup()
+```
+
+Filtrar casos de missing con cantidad mayor a 2 en cada dimensión
+
+```{r}
+icd_11 <- icd_11 %>% 
+  filter(
+    na_NegatAffec <= 2, na_Desinhibit <= 2,
+    na_Detachment <= 2, na_Dissocial <= 2,
+    na_Anankastia <= 2
+  )
+```
+
+# Imputación de datos
+
+Una vez realizado el filtrado de cantidad máximo de *missing* aceptable, se procede a realizar la imputación de datos. El instrumento presenta una escala Likert desde 1 (*strongly disagree*) hasta 5 (*strongly agree*). Debido a esto se utiliza el método de *Regresión Logística* (`LR`) del paquete `TestDataImputation` para el procedimiento en cada dimensión.
+
+```{r}
+NegatAffec <- icd_11 %>% 
+  select(p1, p6, p11, p16, p21, p26, p31,
+         p36, p41, p46, p51, p56) %>% 
+  ImputeTestData(., Mvalue = "NA", 
+                 max.score = 5, 
+                 method = "LR") %>% 
+  as_tibble() 
+```
+
+```{r}
+Desinhibit <- icd_11 %>% 
+  select(p2, p7, p12, p17, p22, p27, p32, 
+         p37, p42, p47, p52, p57) %>% 
+  ImputeTestData(., Mvalue = "NA", 
+                 max.score = 5, 
+                 method = "LR") %>% 
+  as_tibble() 
+```
+
+
+```{r}
+Detachment <- icd_11 %>% 
+  select(p3, p8, p13, p18, p23, p28, p33,
+         p38, p43, p48, p53, p58) %>% 
+  ImputeTestData(., Mvalue = "NA", 
+                 max.score = 5, 
+                 method = "LR") %>% 
+  as_tibble() 
+```
+
+
+```{r}
+Dissocial <- icd_11 %>% 
+  select(p4, p9, p14, p19, p24, p29, p34,
+         p39, p44, p49, p54, p59) %>% 
+  ImputeTestData(., Mvalue = "NA", 
+                 max.score = 5, 
+                 method = "LR") %>% 
+  as_tibble() 
+```
+
+
+```{r}
+Anankastia <- icd_11 %>% 
+  select(p5, p10, p15, p20, p25, p30, p35, 
+         p40, p45, p50, p55, p60) %>% 
+  ImputeTestData(., Mvalue = "NA", 
+                 max.score = 5, 
+                 method = "LR") %>% 
+  as_tibble() 
+```
+
+Una vez realizado la imputación en cada dimensión se prosigue a unificar los datos con los sociodemográficos. 
+
+```{r}
+icd_11 <- icd_11 %>% 
+  select(fcode:yrsEducation, UUTrfEID:rfBXD) %>% 
+  bind_cols(NegatAffec, Desinhibit, Detachment,
+            Dissocial, Anankastia) %>% 
+  relocate(UUTrfEID:rfBXD, .after = last_col())
+```
+
+# Exportación de datos
+
+Por último, se exporta el archivo modificado.
+
+```{r}
+readr::write_csv(icd_11, path = "Carnovale, Sellbom, & Bagby, 2019 Data imputation.csv")
+```
+
+# Información de la sesión
+
+```{r}
+sessionInfo()
+```
+
+
